@@ -3,7 +3,12 @@ qemu:
 	cd qemu; git checkout uharddoom
 	cd qemu; ./configure --target-list=x86_64-softmmu --enable-virtfs
 
-all: qemu
+prboom:
+    git clone https://github.com/bieganski/prboom-plus
+    sudo apt install libsdl1.2-dev libsdl-mixer1.2-dev libsdl-net1.2-dev
+    cd prboom-plus; git checkout udoomdev
+
+all: qemu prboom
 
 
 # TODO do it as root

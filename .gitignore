@@ -1,6 +1,6 @@
 qemu
-
-
+prboom-plus
+*.swp
 # Prerequisites
 *.d
 
