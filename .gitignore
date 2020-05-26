@@ -1,5 +1,9 @@
+hshare
+zso2020.qcow2
+notes.txt
 qemu
 prboom-plus
+
 *.swp
 # Prerequisites
 *.d
