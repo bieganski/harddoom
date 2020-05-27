@@ -15,22 +15,22 @@
 
 MODULE_LICENSE("GPL");
 
-struct adlerdev_buffer {
+struct udoomdev_buffer {
 	struct list_head lh;
-	struct adlerdev_context *ctx;
+	struct udoomdev_context *ctx;
 	void *data_cpu;
 	dma_addr_t data_dma;
 	size_t fill_size;
 };
 
-struct adlerdev_context {
-	struct adlerdev_device *dev;
+struct udoomdev_context {
+	struct udoomdev_device *dev;
 	int pending_buffers;
 	wait_queue_head_t wq;
 	uint32_t sum;
 };
 
-struct adlerdev_device {
+struct udoomdev_device {
 	struct pci_dev *pdev;
 	struct cdev cdev;
 	int idx;
@@ -43,49 +43,49 @@ struct adlerdev_device {
 	wait_queue_head_t idle_wq;
 };
 
-static dev_t adlerdev_devno;
-static struct adlerdev_device *adlerdev_devices[ADLERDEV_MAX_DEVICES];
-static DEFINE_MUTEX(adlerdev_devices_lock);
-static struct class adlerdev_class = {
-	.name = "adlerdev",
+static dev_t udoomdev_devno;
+static struct udoomdev_device *udoomdev_devices[ADLERDEV_MAX_DEVICES];
+static DEFINE_MUTEX(udoomdev_devices_lock);
+static struct class udoomdev_class = {
+	.name = "udoomdev",
 	.owner = THIS_MODULE,
 };
 
 /* Hardware handling. */
 
-static inline void adlerdev_iow(struct adlerdev_device *dev, uint32_t reg, uint32_t val)
+static inline void udoomdev_iow(struct udoomdev_device *dev, uint32_t reg, uint32_t val)
 {
 	iowrite32(val, dev->bar + reg);
-//	printk(KERN_ALERT "adlerdev %03x <- %08x\n", reg, val);
+//	printk(KERN_ALERT "udoomdev %03x <- %08x\n", reg, val);
 }
 
-static inline uint32_t adlerdev_ior(struct adlerdev_device *dev, uint32_t reg)
+static inline uint32_t udoomdev_ior(struct udoomdev_device *dev, uint32_t reg)
 {
 	uint32_t res = ioread32(dev->bar + reg);
-//	printk(KERN_ALERT "adlerdev %03x -> %08x\n", reg, res);
+//	printk(KERN_ALERT "udoomdev %03x -> %08x\n", reg, res);
 	return res;
 }
 
 /* IRQ handler.  */
 
-static irqreturn_t adlerdev_isr(int irq, void *opaque)
+static irqreturn_t udoomdev_isr(int irq, void *opaque)
 {
-	struct adlerdev_device *dev = opaque;
+	struct udoomdev_device *dev = opaque;
 	unsigned long flags;
 	uint32_t istatus;
-	struct adlerdev_buffer *buf;
+	struct udoomdev_buffer *buf;
 	spin_lock_irqsave(&dev->slock, flags);
-//	printk(KERN_ALERT "adlerdev isr\n");
-	istatus = adlerdev_ior(dev, ADLERDEV_INTR) & adlerdev_ior(dev, ADLERDEV_INTR_ENABLE);
+//	printk(KERN_ALERT "udoomdev isr\n");
+	istatus = udoomdev_ior(dev, ADLERDEV_INTR) & udoomdev_ior(dev, ADLERDEV_INTR_ENABLE);
 	if (istatus) {
-		adlerdev_iow(dev, ADLERDEV_INTR, istatus);
+		udoomdev_iow(dev, ADLERDEV_INTR, istatus);
 		BUG_ON(list_empty(&dev->buffers_running));
-		buf = list_entry(dev->buffers_running.next, struct adlerdev_buffer, lh);
+		buf = list_entry(dev->buffers_running.next, struct udoomdev_buffer, lh);
 		list_del(&buf->lh);
 		buf->ctx->pending_buffers--;
 		if (!buf->ctx->pending_buffers)
 			wake_up(&buf->ctx->wq);
-		buf->ctx->sum = adlerdev_ior(dev, ADLERDEV_SUM);
+		buf->ctx->sum = udoomdev_ior(dev, ADLERDEV_SUM);
 		buf->ctx = 0;
 		list_add(&buf->lh, &dev->buffers_free);
 		wake_up(&dev->free_wq);
@@ -94,10 +94,10 @@ static irqreturn_t adlerdev_isr(int irq, void *opaque)
 			wake_up(&dev->idle_wq);
 		} else {
 			/* Run the next buffer.  */
-			buf = list_entry(dev->buffers_running.next, struct adlerdev_buffer, lh);
-			adlerdev_iow(dev, ADLERDEV_DATA_PTR, buf->data_dma);
-			adlerdev_iow(dev, ADLERDEV_SUM, buf->ctx->sum);
-			adlerdev_iow(dev, ADLERDEV_DATA_SIZE, buf->fill_size);
+			buf = list_entry(dev->buffers_running.next, struct udoomdev_buffer, lh);
+			udoomdev_iow(dev, ADLERDEV_DATA_PTR, buf->data_dma);
+			udoomdev_iow(dev, ADLERDEV_SUM, buf->ctx->sum);
+			udoomdev_iow(dev, ADLERDEV_DATA_SIZE, buf->fill_size);
 		}
 	}
 	spin_unlock_irqrestore(&dev->slock, flags);
@@ -106,10 +106,10 @@ static irqreturn_t adlerdev_isr(int irq, void *opaque)
 
 /* Main device node handling.  */
 
-static int adlerdev_open(struct inode *inode, struct file *file)
+static int udoomdev_open(struct inode *inode, struct file *file)
 {
-	struct adlerdev_device *dev = container_of(inode->i_cdev, struct adlerdev_device, cdev);
-	struct adlerdev_context *ctx = kzalloc(sizeof *ctx, GFP_KERNEL);
+	struct udoomdev_device *dev = container_of(inode->i_cdev, struct udoomdev_device, cdev);
+	struct udoomdev_context *ctx = kzalloc(sizeof *ctx, GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 	ctx->dev = dev;
@@ -120,10 +120,10 @@ static int adlerdev_open(struct inode *inode, struct file *file)
 	return nonseekable_open(inode, file);
 }
 
-static int adlerdev_release(struct inode *inode, struct file *file)
+static int udoomdev_release(struct inode *inode, struct file *file)
 {
-	struct adlerdev_context *ctx = file->private_data;
-	struct adlerdev_device *dev = ctx->dev;
+	struct udoomdev_context *ctx = file->private_data;
+	struct udoomdev_device *dev = ctx->dev;
 	unsigned long flags;
 	spin_lock_irqsave(&dev->slock, flags);
 	while (ctx->pending_buffers) {
@@ -136,17 +136,17 @@ static int adlerdev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static ssize_t adlerdev_write(struct file *file, const char __user *buf,
+static ssize_t udoomdev_write(struct file *file, const char __user *buf,
 		size_t len, loff_t *off)
 {
-	struct adlerdev_context *ctx = file->private_data;
-	struct adlerdev_device *dev = ctx->dev;
+	struct udoomdev_context *ctx = file->private_data;
+	struct udoomdev_device *dev = ctx->dev;
 	ssize_t res = 0;
 	unsigned long flags;
-	struct adlerdev_buffer *abuf;
+	struct udoomdev_buffer *abuf;
 	while (len) {
 		size_t clen = min(len, PAGE_SIZE);
-//		printk(KERN_ALERT "adlerdev write %zu\n", clen);
+//		printk(KERN_ALERT "udoomdev write %zu\n", clen);
 		/* Get a free buffer.  */
 		spin_lock_irqsave(&dev->slock, flags);
 		while (list_empty(&dev->buffers_free)) {
@@ -155,7 +155,7 @@ static ssize_t adlerdev_write(struct file *file, const char __user *buf,
 				return res ? res : -ERESTARTSYS;
 			spin_lock_irqsave(&dev->slock, flags);
 		}
-		abuf = list_entry(dev->buffers_free.next, struct adlerdev_buffer, lh);
+		abuf = list_entry(dev->buffers_free.next, struct udoomdev_buffer, lh);
 		list_del(&abuf->lh);
 		spin_unlock_irqrestore(&dev->slock, flags);
 		/* Got buffer, fill it.  */
@@ -172,9 +172,9 @@ static ssize_t adlerdev_write(struct file *file, const char __user *buf,
 		/* Submit it.  */
 		spin_lock_irqsave(&dev->slock, flags);
 		if (list_empty(&dev->buffers_running)) {
-			adlerdev_iow(dev, ADLERDEV_DATA_PTR, abuf->data_dma);
-			adlerdev_iow(dev, ADLERDEV_SUM, abuf->ctx->sum);
-			adlerdev_iow(dev, ADLERDEV_DATA_SIZE, abuf->fill_size);
+			udoomdev_iow(dev, ADLERDEV_DATA_PTR, abuf->data_dma);
+			udoomdev_iow(dev, ADLERDEV_SUM, abuf->ctx->sum);
+			udoomdev_iow(dev, ADLERDEV_DATA_SIZE, abuf->fill_size);
 		}
 		list_add_tail(&abuf->lh, &dev->buffers_running);
 		spin_unlock_irqrestore(&dev->slock, flags);
@@ -186,11 +186,11 @@ static ssize_t adlerdev_write(struct file *file, const char __user *buf,
 	return res;
 }
 
-static ssize_t adlerdev_read(struct file *file, char __user *buf,
+static ssize_t udoomdev_read(struct file *file, char __user *buf,
 		size_t len, loff_t *off)
 {
-	struct adlerdev_context *ctx = file->private_data;
-	struct adlerdev_device *dev = ctx->dev;
+	struct udoomdev_context *ctx = file->private_data;
+	struct udoomdev_device *dev = ctx->dev;
 	uint32_t sum;
 	unsigned long flags;
 	if (len != 4)
@@ -209,24 +209,27 @@ static ssize_t adlerdev_read(struct file *file, char __user *buf,
 	return 4;
 }
 
-static const struct file_operations adlerdev_file_ops = {
+static const struct file_operations udoomdev_file_ops = {
 	.owner = THIS_MODULE,
-	.open = adlerdev_open,
-	.release = adlerdev_release,
-	.write = adlerdev_write,
-	.read = adlerdev_read,
+	.open = udoomdev_open,
+	.release = udoomdev_release,
+	.write = udoomdev_write,
+	.read = udoomdev_read,
 };
 
 /* PCI driver.  */
 
-static int adlerdev_probe(struct pci_dev *pdev,
+static int udoomdev_probe(struct pci_dev *pdev,
 	const struct pci_device_id *pci_id)
 {
 	int err, i;
 	struct list_head *lh, *tmp;
 
+
+	printk(KERN_DEBUG "PROBE");
+
 	/* Allocate our structure.  */
-	struct adlerdev_device *dev = kzalloc(sizeof *dev, GFP_KERNEL);
+	struct udoomdev_device *dev = kzalloc(sizeof *dev, GFP_KERNEL);
 	if (!dev) {
 		err = -ENOMEM;
 		goto out_alloc;
@@ -242,18 +245,18 @@ static int adlerdev_probe(struct pci_dev *pdev,
 	INIT_LIST_HEAD(&dev->buffers_running);
 
 	/* Allocate a free index.  */
-	mutex_lock(&adlerdev_devices_lock);
+	mutex_lock(&udoomdev_devices_lock);
 	for (i = 0; i < ADLERDEV_MAX_DEVICES; i++)
-		if (!adlerdev_devices[i])
+		if (!udoomdev_devices[i])
 			break;
 	if (i == ADLERDEV_MAX_DEVICES) {
 		err = -ENOSPC; // XXX right?
-		mutex_unlock(&adlerdev_devices_lock);
+		mutex_unlock(&udoomdev_devices_lock);
 		goto out_slot;
 	}
-	adlerdev_devices[i] = dev;
+	udoomdev_devices[i] = dev;
 	dev->idx = i;
-	mutex_unlock(&adlerdev_devices_lock);
+	mutex_unlock(&udoomdev_devices_lock);
 
 	/* Enable hardware resources.  */
 	if ((err = pci_enable_device(pdev)))
@@ -265,7 +268,7 @@ static int adlerdev_probe(struct pci_dev *pdev,
 		goto out_mask;
 	pci_set_master(pdev);
 
-	if ((err = pci_request_regions(pdev, "adlerdev")))
+	if ((err = pci_request_regions(pdev, "udoomdev")))
 		goto out_regions;
 
 	/* Map the BAR.  */
@@ -275,12 +278,12 @@ static int adlerdev_probe(struct pci_dev *pdev,
 	}
 
 	/* Connect the IRQ line.  */
-	if ((err = request_irq(pdev->irq, adlerdev_isr, IRQF_SHARED, "adlerdev", dev)))
+	if ((err = request_irq(pdev->irq, udoomdev_isr, IRQF_SHARED, "udoomdev", dev)))
 		goto out_irq;
 
 	/* Allocate some buffers.  */
 	for (i = 0; i < ADLERDEV_NUM_BUFFERS; i++) {
-		struct adlerdev_buffer *buf = kmalloc(sizeof *buf, GFP_KERNEL);
+		struct udoomdev_buffer *buf = kmalloc(sizeof *buf, GFP_KERNEL);
 		if (!buf)
 			goto out_cdev;
 		if (!(buf->data_cpu = dma_alloc_coherent(&dev->pdev->dev,
@@ -293,20 +296,20 @@ static int adlerdev_probe(struct pci_dev *pdev,
 		list_add(&buf->lh, &dev->buffers_free);
 	}
 
-	adlerdev_iow(dev, ADLERDEV_INTR, 1);
-	adlerdev_iow(dev, ADLERDEV_INTR_ENABLE, 1);
+	udoomdev_iow(dev, ADLERDEV_INTR, 1);
+	udoomdev_iow(dev, ADLERDEV_INTR_ENABLE, 1);
 	
 	/* We're live.  Let's export the cdev.  */
-	cdev_init(&dev->cdev, &adlerdev_file_ops);
-	if ((err = cdev_add(&dev->cdev, adlerdev_devno + dev->idx, 1)))
+	cdev_init(&dev->cdev, &udoomdev_file_ops);
+	if ((err = cdev_add(&dev->cdev, udoomdev_devno + dev->idx, 1)))
 		goto out_cdev;
 
 	/* And register it in sysfs.  */
-	dev->dev = device_create(&adlerdev_class,
-			&dev->pdev->dev, adlerdev_devno + dev->idx, dev,
-			"adler%d", dev->idx);
+	dev->dev = device_create(&udoomdev_class,
+			&dev->pdev->dev, udoomdev_devno + dev->idx, dev,
+			"udoom%d", dev->idx);
 	if (IS_ERR(dev->dev)) {
-		printk(KERN_ERR "adlerdev: failed to register subdevice\n");
+		printk(KERN_ERR "udoomdev: failed to register subdevice\n");
 		/* too bad. */
 		dev->dev = 0;
 	}
@@ -314,9 +317,9 @@ static int adlerdev_probe(struct pci_dev *pdev,
 	return 0;
 
 out_cdev:
-	adlerdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
+	udoomdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
 	list_for_each_safe(lh, tmp, &dev->buffers_free) {
-		struct adlerdev_buffer *buf = list_entry(lh, struct adlerdev_buffer, lh);
+		struct udoomdev_buffer *buf = list_entry(lh, struct udoomdev_buffer, lh);
 		dma_free_coherent(&dev->pdev->dev, PAGE_SIZE, buf->data_cpu, buf->data_dma);
 		kfree(buf);
 	}
@@ -329,26 +332,26 @@ out_regions:
 out_mask:
 	pci_disable_device(pdev);
 out_enable:
-	mutex_lock(&adlerdev_devices_lock);
-	adlerdev_devices[dev->idx] = 0;
-	mutex_unlock(&adlerdev_devices_lock);
+	mutex_lock(&udoomdev_devices_lock);
+	udoomdev_devices[dev->idx] = 0;
+	mutex_unlock(&udoomdev_devices_lock);
 out_slot:
 	kfree(dev);
 out_alloc:
 	return err;
 }
 
-static void adlerdev_remove(struct pci_dev *pdev)
+static void udoomdev_remove(struct pci_dev *pdev)
 {
 	struct list_head *lh, *tmp;
-	struct adlerdev_device *dev = pci_get_drvdata(pdev);
+	struct udoomdev_device *dev = pci_get_drvdata(pdev);
 	if (dev->dev) {
-		device_destroy(&adlerdev_class, adlerdev_devno + dev->idx);
+		device_destroy(&udoomdev_class, udoomdev_devno + dev->idx);
 	}
 	cdev_del(&dev->cdev);
-	adlerdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
+	udoomdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
 	list_for_each_safe(lh, tmp, &dev->buffers_free) {
-		struct adlerdev_buffer *buf = list_entry(lh, struct adlerdev_buffer, lh);
+		struct udoomdev_buffer *buf = list_entry(lh, struct udoomdev_buffer, lh);
 		dma_free_coherent(&dev->pdev->dev, PAGE_SIZE, buf->data_cpu, buf->data_dma);
 		kfree(buf);
 	}
@@ -356,16 +359,16 @@ static void adlerdev_remove(struct pci_dev *pdev)
 	pci_iounmap(pdev, dev->bar);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
-	mutex_lock(&adlerdev_devices_lock);
-	adlerdev_devices[dev->idx] = 0;
-	mutex_unlock(&adlerdev_devices_lock);
+	mutex_lock(&udoomdev_devices_lock);
+	udoomdev_devices[dev->idx] = 0;
+	mutex_unlock(&udoomdev_devices_lock);
 	kfree(dev);
 }
 
-static int adlerdev_suspend(struct pci_dev *pdev, pm_message_t state)
+static int udoomdev_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	unsigned long flags;
-	struct adlerdev_device *dev = pci_get_drvdata(pdev);
+	struct udoomdev_device *dev = pci_get_drvdata(pdev);
 	spin_lock_irqsave(&dev->slock, flags);
 	while (list_empty(&dev->buffers_free)) {
 		spin_unlock_irqrestore(&dev->slock, flags);
@@ -373,59 +376,59 @@ static int adlerdev_suspend(struct pci_dev *pdev, pm_message_t state)
 		spin_lock_irqsave(&dev->slock, flags);
 	}
 	spin_unlock_irqrestore(&dev->slock, flags);
-	adlerdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
+	udoomdev_iow(dev, ADLERDEV_INTR_ENABLE, 0);
 	return 0;
 }
 
-static int adlerdev_resume(struct pci_dev *pdev)
+static int udoomdev_resume(struct pci_dev *pdev)
 {
-	struct adlerdev_device *dev = pci_get_drvdata(pdev);
-	adlerdev_iow(dev, ADLERDEV_INTR, 1);
-	adlerdev_iow(dev, ADLERDEV_INTR_ENABLE, 1);
+	struct udoomdev_device *dev = pci_get_drvdata(pdev);
+	udoomdev_iow(dev, ADLERDEV_INTR, 1);
+	udoomdev_iow(dev, ADLERDEV_INTR_ENABLE, 1);
 	return 0;
 }
 
-static struct pci_device_id adlerdev_pciids[] = {
-	{ PCI_DEVICE(ADLERDEV_VENDOR_ID, ADLERDEV_DEVICE_ID) },
+static struct pci_device_id udoomdev_pciids[] = {
+	{ PCI_DEVICE(UHARDDOOM_VENDOR_ID, UHARDDOOM_DEVICE_ID) },
 	{ 0 }
 };
 
-static struct pci_driver adlerdev_pci_driver = {
-	.name = "adlerdev",
-	.id_table = adlerdev_pciids,
-	.probe = adlerdev_probe,
-	.remove = adlerdev_remove,
-	.suspend = adlerdev_suspend,
-	.resume = adlerdev_resume,
+static struct pci_driver udoomdev_pci_driver = {
+	.name = "udoomdev",
+	.id_table = udoomdev_pciids,
+	.probe = udoomdev_probe,
+	.remove = udoomdev_remove,
+	.suspend = udoomdev_suspend,
+	.resume = udoomdev_resume,
 };
 
 /* Init & exit.  */
 
-static int adlerdev_init(void)
+static int udoomdev_init(void)
 {
 	int err;
-	if ((err = alloc_chrdev_region(&adlerdev_devno, 0, ADLERDEV_MAX_DEVICES, "adlerdev")))
+	if ((err = alloc_chrdev_region(&udoomdev_devno, 0, ADLERDEV_MAX_DEVICES, "udoomdev")))
 		goto err_chrdev;
-	if ((err = class_register(&adlerdev_class)))
+	if ((err = class_register(&udoomdev_class)))
 		goto err_class;
-	if ((err = pci_register_driver(&adlerdev_pci_driver)))
+	if ((err = pci_register_driver(&udoomdev_pci_driver)))
 		goto err_pci;
 	return 0;
 
 err_pci:
-	class_unregister(&adlerdev_class);
+	class_unregister(&udoomdev_class);
 err_class:
-	unregister_chrdev_region(adlerdev_devno, ADLERDEV_MAX_DEVICES);
+	unregister_chrdev_region(udoomdev_devno, ADLERDEV_MAX_DEVICES);
 err_chrdev:
 	return err;
 }
 
-static void adlerdev_exit(void)
+static void udoomdev_exit(void)
 {
-	pci_unregister_driver(&adlerdev_pci_driver);
-	class_unregister(&adlerdev_class);
-	unregister_chrdev_region(adlerdev_devno, ADLERDEV_MAX_DEVICES);
+	pci_unregister_driver(&udoomdev_pci_driver);
+	class_unregister(&udoomdev_class);
+	unregister_chrdev_region(udoomdev_devno, ADLERDEV_MAX_DEVICES);
 }
 
-module_init(adlerdev_init);
-module_exit(adlerdev_exit);
+module_init(udoomdev_init);
+module_exit(udoomdev_exit);

@@ -3,8 +3,6 @@
 
 /* Section 1: PCI ids. */
 
-#define ADLERDEV_VENDOR_ID				0x0666
-#define ADLERDEV_DEVICE_ID				0x0a32
 
 /* Section 2: MMIO registers.  */
 
