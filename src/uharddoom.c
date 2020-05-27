@@ -8,7 +8,7 @@
 #include <linux/kref.h>
 #include <linux/interrupt.h>
 
-#include "adlerdev.h"
+#include "uharddoom.h"
 
 #define ADLERDEV_MAX_DEVICES 256
 #define ADLERDEV_NUM_BUFFERS 16

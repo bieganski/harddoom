@@ -1,0 +1,22 @@
+Note: all tests should complete with exit code 0 and no output.
+Some of the tests require 2 devices.
+
+- [mmap] create buffer + mmap + fill
+- [draw] draw_line, dump & check output
+- [draw_ro] attempt to draw on read-only buffer
+- [large_wait] wait with large param
+- [invalid_cmd] invalid commands send to device,
+- [pagefault1] invalid operation list
+- [pagefault2] invalid buffer addr
+- [partial_op] attempt to execute part of operation
+- [crossmap] mapping buffer from devA to devB
+- [dumb_map] mapping of non-buffer
+- [crossdraw] check if 2 contexts have separate virtual memory (1 device)
+- [buf_zero] buffer of size 0
+- [large_alloc] perform large allocation
+- [draw_double_mmap] double mapping of the same buffer
+- [invalid_cmd2] run with invalid params
+- [invalid_ioctl]  invalid ioctl addr
+- [overflow] try access memory outside buffer
+- [unmap_invalid_addr] try unmapping invalid buffer
+- [large_op] execute large set of operations and attempt to release resources w/o wait
